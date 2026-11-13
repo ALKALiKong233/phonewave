@@ -1,0 +1,22 @@
+# Override usb0 default route metric above dmail's cellular route (10000)
+# so plugging in USB for SSH/charging without host NAT does not black-hole 5G.
+[Match]
+Name=usb0
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+Address=10.77.71.2/30
+DHCPServer=yes
+KeepConfiguration=static
+
+[DHCPServer]
+PoolOffset=1
+PoolSize=1
+EmitRouter=no
+EmitDNS=no
+
+[Route]
+Gateway=10.77.71.1
+Metric=20000
