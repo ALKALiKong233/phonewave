@@ -5,8 +5,8 @@ pkgdesc='Phonewave phone system configuration: services, SSH, USB network, sessi
 license=(MIT)
 _src=$startdir/../../rootfs
 . "$startdir/../recipe.sh"
-# 3: protected stereo audio settings for Xiaomi Lisa.
-pkgrel=3
+# 4: keep Voice Call nodes active on Xiaomi Lisa.
+pkgrel=4
 arch=(any)
 # Every phone has this package: through it pacman -Syu brings what the image
 # installs, including what it added after the phone was made.
