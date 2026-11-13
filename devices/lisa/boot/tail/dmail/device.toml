@@ -1,0 +1,30 @@
+[data]
+ipa_netdev = "rmnet_ipa0"
+dpm = { ep_type = "embedded", iface = 1, rx = 2, tx = 16 }
+qmap = "v5"
+dl_datagrams = 16
+dl_datagram_size = 8192
+mtu_max = 1492
+
+[ims]
+manufacturer = "Xiaomi"
+model = "Xiaomi 11 Lite NE"
+build = "SQ3A.230810.001"
+release = "12"
+sdk = "32"
+
+[pdc]
+# China Telecom (hVoLTE_OpenMkt)
+"460:11" = "b7:50:ec:b2:28:33:85:23:20:9a:a2:74:c4:f5:72:e1:7c:b3:da:b1"
+# China Mobile (Volte_OpenMkt)
+"460:00" = "86:20:69:cf:10:9b:24:5e:e9:60:67:45:96:16:f6:44:0d:24:d4:2a"
+"460:02" = "86:20:69:cf:10:9b:24:5e:e9:60:67:45:96:16:f6:44:0d:24:d4:2a"
+"460:04" = "86:20:69:cf:10:9b:24:5e:e9:60:67:45:96:16:f6:44:0d:24:d4:2a"
+"460:07" = "86:20:69:cf:10:9b:24:5e:e9:60:67:45:96:16:f6:44:0d:24:d4:2a"
+"460:08" = "86:20:69:cf:10:9b:24:5e:e9:60:67:45:96:16:f6:44:0d:24:d4:2a"
+# China Unicom (VoLTE)
+"460:01" = "f1:0a:cf:83:27:66:7e:e4:97:8a:80:4a:79:ac:22:fe:10:fa:d9:95"
+"460:06" = "f1:0a:cf:83:27:66:7e:e4:97:8a:80:4a:79:ac:22:fe:10:fa:d9:95"
+"460:09" = "f1:0a:cf:83:27:66:7e:e4:97:8a:80:4a:79:ac:22:fe:10:fa:d9:95"
+# China Broadnet (Volte_OpenMkt)
+"460:15" = "79:2a:bb:33:fa:ab:f7:d3:94:12:96:51:bc:65:09:94:83:36:c1:ee"

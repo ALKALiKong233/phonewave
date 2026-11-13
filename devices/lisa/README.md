@@ -38,9 +38,10 @@ the GPU context and Denial aborts during GBM initialization.
   - `ath11k/WCN6750/hw1.0/board-2.bin` (WCN6750 Wi-Fi board data)
   - `qcom/sm7325/xiaomi/lisa/{a660_zap.mbn,ipa_fws.mbn,vpu20_1v.mbn}`
 - **Rootfs (`/usr/lib/firmware/qcom/sm7325/xiaomi/lisa/`)**:
-  - `modem.mbn`, `adsp.mbn`, `cdsp.mbn`, `wpss.mbn`, and `modem_pr/`
-    (loaded on demand after `switch_root` when `firmware_class` falls back
-    from the tail's firmware path to `/usr/lib/firmware`).
+  - `modem.mbn`, `modemr.jsn`, `adsp.mbn`, `cdsp.mbn`, `wpss.mbn`, and
+    `modem_pr/` (loaded on demand after `switch_root` when `firmware_class`
+    falls back from the tail's firmware path to `/usr/lib/firmware`, and
+    served to the modem by `tqftpserv`).
 - **Stock partitions (`super` + `persist`)**:
   - `hexagonrpcd.service` (`hexagonrpcd-stock-sensors.service`) reads sensor
     configs from `vendor` + `odm` inside intact `super` and calibration
@@ -52,15 +53,17 @@ the GPU context and Denial aborts during GBM initialization.
   `dtbo_a` boots the installed rootfs. With `linux-firmware-qcom` installed,
   Denial's hardware GLES renderer and DSI-1 at 1080x2400/90 Hz were verified
   on-device, including a captured first-start setup screen (2026-11-13).
-- Audio: `MultiMedia1` (`PCM0`) playback and `MultiMedia2` (`PCM1`) capture
-  are verified with `services/audio/ucm/ucm2/Qualcomm/sm7325/Xiaomi-Lisa/HiFi.conf`
-  and `52-xiaomi-lisa.conf` (48 kHz S16_LE stereo into the TFA9873 protection
-  container). Add `VoiceCall.conf` under that UCM directory for modem call audio.
+- Audio: `MultiMedia1` (`PCM0`) playback, `MultiMedia2` (`PCM1`) capture,
+  and APR Q6Voice `VoiceMMode1` (`PCM2`) modem call audio are wired with
+  `services/audio/ucm/ucm2/Qualcomm/sm7325/Xiaomi-Lisa/{HiFi,VoiceCall}.conf`
+  and `52-xiaomi-lisa.conf` (which also keeps `Voice_Call` PipeWire nodes
+  prepared so `callaudio` activates `q6voice` without `q6voiced`).
 - Sensors & rotation: ADSP uses non-secure FastRPC `/dev/fastrpc-adsp` via
   `boot/tail/systemd/system/hexagonrpcd.service.d/lisa.conf`, with real
   registry writes and mainline `qcom_socinfo` metadata in `hexagonrpcd`.
   `steinerd` defaults (`+y` top edge) match the panel frame and Denial rotates
   `DSI-1` across all four orientations.
-- Modem (`dmail`): add `boot/tail/dmail/device.toml` and enable
-  `dmail.service` once SM7325 IPA embedded endpoint IDs are verified on-device.
+- Modem (`dmail`): configured in `boot/tail/dmail/device.toml` (SM7325 IPA v4.11
+  embedded endpoints `rx = 2, tx = 16`, `qmap = "v5"`, `[ims]`, and `[pdc]`
+  carrier MBN selection) and enabled via `dmail.service`.
 - Fingerprint: side-mounted power-button sensor is not yet wired.
