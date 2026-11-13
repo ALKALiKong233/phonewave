@@ -4,6 +4,8 @@ pkgdesc="ALSA UCM profiles of the Phonewave phones' sound cards"
 license=(MIT)
 _src=$startdir/../../../services/audio/ucm
 . "$startdir/../recipe.sh"
+# 2: establish Lisa's backend routes before ACP probes the PCM.
+pkgrel=2
 arch=(any)
 depends=(alsa-ucm-conf)
 
