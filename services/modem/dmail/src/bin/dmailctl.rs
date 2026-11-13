@@ -500,7 +500,11 @@ async fn send(number: &str, text: &str) -> Result {
         pdu::encode_submit(number, text, nanos as u8, false).map_err(|e| format!("{e:?}"))?;
     let wms = client(service::WMS).await?;
     for (part, n) in parts.iter().zip(1..) {
-        match wms::raw_send(&wms, part).await? {
+        let mut res = wms::raw_send(&wms, part, false).await?;
+        if matches!(res, (Err(qmi::Error::Qmi(0x0035 | 0x0046)), _)) {
+            res = wms::raw_send(&wms, part, true).await?;
+        }
+        match res {
             (Ok(reference), _) => println!("part {n}/{}: sent, reference {reference}", parts.len()),
             (Err(e), cause) => {
                 return Err(format!("part {n}/{}: {e}, cause {cause:?}", parts.len()).into());

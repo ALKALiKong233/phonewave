@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::process::Stdio;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -25,7 +26,7 @@ use crate::qrtr::{Addr, Event as QrtrEvent, Lookup, Service};
 use crate::sim::{self, Pin};
 use crate::sms::store::Store;
 use crate::sms::{pdu, wms};
-use crate::{apn, data, modem, network, resolved, voice};
+use crate::{apn, data, modem, network, pdc, qrtr, resolved, voice};
 
 const SETUP: &str = "/usr/lib/dmail/modem-setup";
 const SETUP_TIMEOUT: Duration = Duration::from_secs(60);
@@ -91,6 +92,7 @@ enum Event {
     Command(Command),
     ModemGone,
     Retry,
+    PdcRetry,
     Stop,
 }
 
@@ -340,6 +342,12 @@ impl Daemon<'_> {
             dns_default: None,
             calls: Vec::new(),
             ims: Registration::Off,
+            ims_registered: Arc::new(AtomicBool::new(false)),
+            ims_tx: ims_tx.clone(),
+            ims_task: None,
+            pdc_applied: false,
+            pdc_retry_at: None,
+            pdc_tries: 0,
             _tasks: tasks,
         };
 
@@ -349,6 +357,7 @@ impl Daemon<'_> {
             log(e);
         }
         if life.sim == Sim::Ready {
+            life.ensure_pdc(self).await;
             life.read_number(&mut props).await;
         }
         life.refresh_network(self, &mut props).await;
@@ -356,10 +365,7 @@ impl Daemon<'_> {
             life.import_stored(self).await;
         }
         life.connect(self).await;
-        if let Some(task) = life.start_ims(self, ims_tx).await {
-            life._tasks.push(task);
-        }
-        // Calls already running when dmail started.
+        life.ims_task = life.start_ims(self, ims_tx).await;
         match voice::calls(&life.m.voice).await {
             Ok(calls) => life.update_calls(self, calls).await,
             Err(e) => log(format!("calls: {e}")),
@@ -369,6 +375,24 @@ impl Daemon<'_> {
             let commands = &self.commands;
             let signals = &mut self.signals;
             let retry_at = life.retry_at;
+            let pdc_retry_at = life.pdc_retry_at;
+            let timer = async {
+                match (retry_at, pdc_retry_at) {
+                    (Some(a), Some(b)) if b < a => {
+                        Timer::at(b).await;
+                        Event::PdcRetry
+                    }
+                    (Some(a), _) => {
+                        Timer::at(a).await;
+                        Event::Retry
+                    }
+                    (None, Some(b)) => {
+                        Timer::at(b).await;
+                        Event::PdcRetry
+                    }
+                    (None, None) => future::pending().await,
+                }
+            };
             let event = future::or(
                 future::or(
                     async { rx.recv().await.unwrap_or(Event::ModemGone) },
@@ -379,13 +403,7 @@ impl Daemon<'_> {
                         signals.next().await;
                         Event::Stop
                     },
-                    async {
-                        match retry_at {
-                            Some(at) => Timer::at(at).await,
-                            None => future::pending::<Instant>().await,
-                        };
-                        Event::Retry
-                    },
+                    timer,
                 ),
             );
             match event.await {
@@ -408,6 +426,16 @@ impl Daemon<'_> {
                 Event::Retry => {
                     life.retry_at = None;
                     life.connect(self).await;
+                }
+                Event::PdcRetry => {
+                    life.pdc_retry_at = None;
+                    if life.ensure_pdc(self).await {
+                        life.refresh_network(self, &mut props).await;
+                        life.connect(self).await;
+                        life.ims_task = None;
+                        let tx = life.ims_tx.clone();
+                        life.ims_task = life.start_ims(self, tx).await;
+                    }
                 }
                 Event::ModemGone => break End::ModemGone,
                 Event::Stop => break End::Stop,
@@ -747,6 +775,12 @@ struct Life {
     /// The modem's calls.
     calls: Vec<Tracked>,
     ims: Registration,
+    ims_registered: Arc<AtomicBool>,
+    ims_tx: Sender<Event>,
+    ims_task: Option<Task<()>>,
+    pdc_applied: bool,
+    pdc_retry_at: Option<Instant>,
+    pdc_tries: u8,
     _tasks: Vec<Task<()>>,
 }
 
@@ -841,10 +875,74 @@ impl Life {
 
     /// What follows the SIM becoming usable.
     async fn sim_ready(&mut self, d: &Daemon<'_>, props: &mut ModemProps) {
+        self.ensure_pdc(d).await;
         self.read_number(props).await;
         self.refresh_network(d, props).await;
         self.import_stored(d).await;
         self.connect(d).await;
+    }
+
+    async fn ensure_pdc(&mut self, d: &Daemon<'_>) -> bool {
+        if d.device.pdc.is_empty() || self.pdc_applied {
+            return false;
+        }
+        let Ok(Some((mcc, mnc))) = network::home_network(&self.m.nas).await else {
+            if self.pdc_tries < 18 {
+                self.pdc_tries += 1;
+                self.pdc_retry_at = Some(Instant::now() + Duration::from_secs(5));
+            }
+            return false;
+        };
+        let Some(id) = d.device.pdc_id(mcc, mnc) else {
+            self.pdc_applied = true;
+            return false;
+        };
+        if matches!(data::has_ims_profile(&self.m.wds).await, Ok(true)) {
+            if self.pdc_tries < 18 {
+                self.pdc_tries += 1;
+                self.pdc_retry_at = Some(Instant::now() + Duration::from_secs(5));
+            } else {
+                self.pdc_applied = true;
+            }
+            return false;
+        }
+        let Ok(Some(svc)) = qrtr::find(service::PDC).await else {
+            log("PDC: service not found");
+            self.pdc_applied = true;
+            return false;
+        };
+        let Ok(client) = Client::new(svc.addr) else {
+            self.pdc_applied = true;
+            return false;
+        };
+        match pdc::activate_software(&client, &id).await {
+            Ok(true) => {
+                self.pdc_applied = true;
+                self.pdc_retry_at = None;
+                log(format!("PDC: activated carrier profile for {mcc}-{mnc:02}"));
+                Timer::after(Duration::from_secs(2)).await;
+                true
+            }
+            Ok(false) => {
+                self.pdc_applied = true;
+                self.pdc_retry_at = None;
+                false
+            }
+            Err(e)
+                if (matches!(e, qmi::Error::Qmi(0x0029) | qmi::Error::Timeout) || e.not_ready())
+                    && self.pdc_tries < 24 =>
+            {
+                self.pdc_tries += 1;
+                self.pdc_retry_at = Some(Instant::now() + Duration::from_secs(5));
+                false
+            }
+            Err(e) => {
+                self.pdc_applied = true;
+                self.pdc_retry_at = None;
+                log(format!("PDC: activating {mcc}-{mnc:02}: {e}"));
+                false
+            }
+        }
     }
 
     /// The open SIM's own number, for Modem1.Number.
@@ -1000,6 +1098,8 @@ impl Life {
             return;
         }
         self.ims = r;
+        self.ims_registered
+            .store(r == Registration::Registered, Ordering::Relaxed);
         props.ims = r.as_str().into();
         d.publish_modem(props);
         self.hold_voice_preference().await;
@@ -1418,6 +1518,7 @@ impl Life {
                     d.bus.clone(),
                     d.store.clone(),
                     self.m.wms.clone(),
+                    self.ims_registered.clone(),
                     id,
                     report,
                 );
@@ -1446,6 +1547,9 @@ impl Life {
         log(format!("moving to the SIM in slot {}", d.settings.sim_slot));
         self.end_session().await;
         self.apn = None;
+        self.pdc_applied = false;
+        self.pdc_retry_at = None;
+        self.pdc_tries = 0;
         self.sim = Sim::Missing;
         props.number.clear();
         if let Err(e) = self.open_sim(d, props).await {
@@ -1604,7 +1708,14 @@ async fn settle(d: &Daemon<'_>, r: &pdu::StatusReport) {
 
 /// Sends a stored outgoing message, part by part; with `report`, every part
 /// asks for a status report.
-async fn send(bus: Bus, store: Arc<Mutex<Store>>, wms: Rc<Client>, id: u64, report: bool) {
+async fn send(
+    bus: Bus,
+    store: Arc<Mutex<Store>>,
+    wms: Rc<Client>,
+    ims_registered: Arc<AtomicBool>,
+    id: u64,
+    report: bool,
+) {
     let message = store.lock().unwrap().outgoing(id);
     let parts = match message {
         Ok(Some((peer, text))) => pdu::encode_submit(&peer, &text, (now() & 0xff) as u8, report)
@@ -1613,7 +1724,7 @@ async fn send(bus: Bus, store: Arc<Mutex<Store>>, wms: Rc<Client>, id: u64, repo
         Err(e) => Err(e.to_string()),
     };
     let sent = match parts {
-        Ok(parts) => send_parts(&store, &wms, id, &parts, report).await,
+        Ok(parts) => send_parts(&store, &wms, &ims_registered, id, &parts, report).await,
         Err(e) => Err(e),
     };
     let state = match sent {
@@ -1634,19 +1745,28 @@ async fn send(bus: Bus, store: Arc<Mutex<Store>>, wms: Rc<Client>, id: u64, repo
 async fn send_parts(
     store: &Mutex<Store>,
     wms: &Client,
+    ims_registered: &AtomicBool,
     id: u64,
     parts: &[Vec<u8>],
     report: bool,
 ) -> Result<(), String> {
     for part in parts {
-        match wms::raw_send(wms, part).await {
-            Ok((Ok(reference), _)) => {
+        let on_ims = ims_registered.load(Ordering::Relaxed);
+        let mut res = wms::raw_send(wms, part, on_ims)
+            .await
+            .map_err(|e| e.to_string())?;
+        if matches!(res, (Err(qmi::Error::Qmi(0x0035 | 0x0046)), _)) {
+            res = wms::raw_send(wms, part, !on_ims)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        match res {
+            (Ok(reference), _) => {
                 if report && let Err(e) = store.lock().unwrap().await_report(id, reference) {
                     log(format!("SMS {id}: {e}"));
                 }
             }
-            Ok((Err(e), cause)) => return Err(format!("{e}, cause {cause:?}")),
-            Err(e) => return Err(e.to_string()),
+            (Err(e), cause) => return Err(format!("{e}, cause {cause:?}")),
         }
     }
     Ok(())

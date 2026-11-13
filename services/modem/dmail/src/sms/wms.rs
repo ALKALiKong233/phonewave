@@ -82,11 +82,14 @@ pub async fn ack(wms: &Client, transaction: u32, on_ims: bool) -> Result<(), Err
 pub async fn raw_send(
     wms: &Client,
     pdu: &[u8],
+    on_ims: bool,
 ) -> Result<(Result<u16, Error>, Option<(u16, u8)>), Error> {
     let mut data = vec![FORMAT_GW_PP];
     data.extend_from_slice(&(pdu.len() as u16).to_le_bytes());
     data.extend_from_slice(pdu);
-    let msg = Message::request(RAW_SEND).with(0x01, data).with(0x13, [0]);
+    let msg = Message::request(RAW_SEND)
+        .with(0x01, data)
+        .with(0x13, [u8::from(on_ims)]);
     let reply = wms.request(msg, SEND_TIMEOUT).await?;
     let cause = match reply.tlv(0x12) {
         Some(&[r0, r1, tp]) => Some((u16::from_le_bytes([r0, r1]), tp)),

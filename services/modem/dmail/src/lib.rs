@@ -10,6 +10,7 @@ pub mod ims;
 pub mod modem;
 pub mod netlink;
 pub mod network;
+pub mod pdc;
 pub mod qmi;
 pub mod qrtr;
 pub mod resolved;

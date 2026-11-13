@@ -1,6 +1,7 @@
 //! The device file, the APN override and the user's settings.
 
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 use std::{fs, io};
 
 use serde::Deserialize;
@@ -20,6 +21,9 @@ pub struct Device {
     pub data: DataConfig,
     /// VoLTE: what the modem is told about the phone. None: no VoLTE.
     pub ims: Option<ImsConfig>,
+    /// Optional MCC:MNC -> 20-byte software MBN SHA-1 id for QMI PDC activation.
+    #[serde(default)]
+    pub pdc: HashMap<String, String>,
 }
 
 /// The phone as its stock Android names it, from the build's properties.
@@ -80,6 +84,9 @@ impl Device {
                 path.display()
             ));
         }
+        for (net, hex_id) in &device.pdc {
+            parse_pdc_id(hex_id).map_err(|e| format!("{}: pdc {net:?}: {e}", path.display()))?;
+        }
         Ok(device)
     }
 
@@ -93,7 +100,30 @@ impl Device {
             iface: self.data.dpm.iface,
         })
     }
+
+    pub fn pdc_id(&self, mcc: u16, mnc: u16) -> Option<[u8; 20]> {
+        let padded = format!("{mcc}:{mnc:02}");
+        let plain = format!("{mcc}:{mnc}");
+        self.pdc
+            .get(&padded)
+            .or_else(|| self.pdc.get(&plain))
+            .and_then(|s| parse_pdc_id(s).ok())
+    }
 }
+
+fn parse_pdc_id(s: &str) -> Result<[u8; 20], String> {
+    let hex: String = s.chars().filter(|c| *c != ':').collect();
+    if hex.len() != 40 {
+        return Err("expected 20-byte hex config id".into());
+    }
+    let mut out = [0u8; 20];
+    for (i, slot) in out.iter_mut().enumerate() {
+        *slot = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .map_err(|_| "invalid hex byte in config id".to_string())?;
+    }
+    Ok(out)
+}
+
 
 /// `apn = "name"` in the APN file, if there is one.
 pub fn apn_override(path: &Path) -> Result<Option<String>, String> {

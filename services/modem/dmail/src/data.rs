@@ -12,6 +12,7 @@ const WDS_START_NETWORK: u16 = 0x20;
 const WDS_STOP_NETWORK: u16 = 0x21;
 pub const WDS_PACKET_SERVICE_STATUS: u16 = 0x22;
 const WDS_GET_CURRENT_SETTINGS: u16 = 0x2d;
+const WDS_GET_PROFILE_LIST: u16 = 0x2a;
 const WDS_SET_IP_FAMILY: u16 = 0x4d;
 const WDS_BIND_MUX_DATA_PORT: u16 = 0xa2;
 
@@ -232,6 +233,13 @@ pub fn parse_settings(msg: &Message) -> Result<Settings, Error> {
 pub async fn settings(wds: &Client) -> Result<Settings, Error> {
     let msg = Message::request(WDS_GET_CURRENT_SETTINGS).with(0x10, 0xffffu32.to_le_bytes());
     parse_settings(&wds.call(msg, TIMEOUT).await?)
+}
+
+/// Whether the 3GPP profile list holds a secondary profile (such as profile 2, IMS).
+pub async fn has_ims_profile(wds: &Client) -> Result<bool, Error> {
+    let msg = Message::request(WDS_GET_PROFILE_LIST).with(0x10, [0x00]);
+    let reply = wds.call(msg, TIMEOUT).await?;
+    Ok(reply.tlv(0x01).and_then(|v| v.first().copied()).unwrap_or(0) >= 2)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
