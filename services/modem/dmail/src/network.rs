@@ -14,6 +14,7 @@ pub const SYSTEM_INFO_IND: u16 = 0x4e;
 pub const SIGNAL_INFO: u16 = 0x4f;
 const CONFIG_SIGNAL_INFO: u16 = 0x50;
 pub const SIGNAL_INFO_IND: u16 = 0x51;
+const CONFIG_SIGNAL_INFO_V2: u16 = 0x6c;
 pub const NETWORK_REJECT: u16 = 0x68;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -121,10 +122,16 @@ pub async fn serving(nas: &Client) -> Result<Serving, Error> {
     parse_serving(&nas.call(Message::request(SERVING_SYSTEM), TIMEOUT).await?)
 }
 
-/// Signal strength, 0 to 100: RSRP on LTE, RSSI on 2G and 3G.
+/// Signal strength, 0 to 100: RSRP on 5G NR and LTE, RSSI on 2G and 3G.
 pub fn parse_signal(msg: &Message) -> Option<u8> {
     let percent =
         |value: i32, low: i32, high: i32| ((value - low) * 100 / (high - low)).clamp(0, 100) as u8;
+    if let Some(nr5g) = msg.tlv(0x17).filter(|v| v.len() >= 2) {
+        let rsrp = i16::from_le_bytes([nr5g[0], nr5g[1]]);
+        if (-156..=-20).contains(&rsrp) {
+            return Some(percent(rsrp.into(), -140, -98));
+        }
+    }
     if let Some(lte) = msg.tlv(0x14).filter(|v| v.len() >= 4) {
         let rsrp = i16::from_le_bytes([lte[2], lte[3]]);
         return Some(percent(rsrp.into(), -140, -98));
@@ -284,8 +291,15 @@ pub async fn report_changes(nas: &Client) -> Result<(), Error> {
     }
     let msg = Message::request(CONFIG_SIGNAL_INFO)
         .with(0x10, rssi)
-        .with(0x16, rsrp);
-    nas.call(msg, TIMEOUT).await.map(drop)
+        .with(0x16, rsrp.clone());
+    nas.call(msg, TIMEOUT).await?;
+    let nr5g = Message::request(CONFIG_SIGNAL_INFO_V2)
+        .with(0x37, [1, 0])
+        .with(0x35, rsrp);
+    match nas.call(nr5g, TIMEOUT).await {
+        Ok(_) | Err(Error::Qmi(_)) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// The SIM's home network, MCC and MNC.
@@ -349,6 +363,9 @@ mod tests {
         assert_eq!(parse_signal(&lte), Some(50));
         let gsm = Message::request(SIGNAL_INFO).with(0x12, [(-82i8) as u8]);
         assert_eq!(parse_signal(&gsm), Some(50));
+        // 5G NR RSRP -119 dBm (0xff89), SNR 20.0 dB (0x00c8).
+        let nr5g = Message::request(SIGNAL_INFO).with(0x17, [0x89, 0xff, 0xc8, 0x00]);
+        assert_eq!(parse_signal(&nr5g), Some(50));
         assert_eq!(parse_signal(&Message::request(SIGNAL_INFO)), None);
     }
 

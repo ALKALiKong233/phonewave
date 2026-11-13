@@ -1000,7 +1000,7 @@ impl Life {
                         props.state
                     ));
                 }
-                if radio_changed {
+                if radio_changed || (s.registered() && props.signal == 0) {
                     props.signal = match network::signal(&self.m.nas).await {
                         Ok(signal) => signal.unwrap_or(0),
                         Err(e) => {
@@ -1441,7 +1441,8 @@ impl Life {
                 self.end_session().await;
                 self.refused = false;
                 self.retry = FIRST_RETRY;
-                self.connect(d).await;
+                self.retry_at = Some(Instant::now() + Duration::from_millis(500));
+                d.publish_data("connecting");
             }
             Command::RestartRadio(reply) => {
                 if !self.calls.is_empty() {
