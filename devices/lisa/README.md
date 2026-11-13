@@ -27,6 +27,12 @@ The full `firmware-xiaomi-lisa` set (~178 MiB) does not fit inside the
 192 MiB `boot` partition alongside kernel, ramdisk, and modules. It is
 split as follows:
 
+The rootfs must also install `linux-firmware-qcom` and its dependencies from
+Arch Linux ARM (`image/packages/base`). The board's proprietary package and
+tail do not contain the standard `qcom/a660_sqe.fw` and `qcom/a660_gmu.bin`
+GPU microcode. Without them KMS still exposes DSI-1, but Mesa cannot create
+the GPU context and Denial aborts during GBM initialization.
+
 - **Tail (`$PHONEWAVE_VAULT/lisa/firmware/`)**:
   - `tfa98xx.cnt` (TFA9873 SmartPA protection container)
   - `ath11k/WCN6750/hw1.0/board-2.bin` (WCN6750 Wi-Fi board data)
@@ -40,10 +46,12 @@ split as follows:
     configs from `vendor` + `odm` inside intact `super` and calibration
     from `persist`.
 
-## Open bring-up items
+## Bring-up status
 
-- First on-device boot test of ABL header v3 + `fdt-handoff` against stock
-  `vendor_boot` / `dtbo` (watchdog and `fb` / memory reservations).
+- ABL header v3 + `fdt-handoff` against restored stock `vendor_boot_a` and
+  `dtbo_a` boots the installed rootfs. With `linux-firmware-qcom` installed,
+  Denial's hardware GLES renderer and DSI-1 at 1080x2400/90 Hz were verified
+  on-device, including a captured first-start setup screen (2026-11-13).
 - Modem (`dmail`): add `boot/tail/dmail/device.toml` and enable
   `dmail.service` once SM7325 IPA embedded endpoint IDs are verified on-device.
 - Audio: add `VoiceCall.conf` under

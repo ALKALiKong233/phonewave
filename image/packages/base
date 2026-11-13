@@ -7,6 +7,9 @@ networkmanager
 wpa_supplicant
 iw
 wireless-regdb
+# Standard GPU microcode, Wi-Fi and Bluetooth firmware; board overrides live
+# in the device's tail or its separate proprietary firmware package.
+linux-firmware-qcom
 bluez
 bluez-utils
 pipewire
