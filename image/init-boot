@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Pack the early userspace into the init_boot image every phone shares; no
 # device access.
-# Usage: image/init-boot OUTPUT [--dev-access] [--rescue]
+# Usage: image/init-boot OUTPUT [--ramdisk] [--dev-access] [--rescue]
 #
 #   --dev-access  root's SSH keys from every phone's vault let the rescue's
 #                 SSH in. Only for images that never leave this workstation.
@@ -23,19 +23,20 @@
 # phone has so far.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-usage='usage: image/init-boot OUTPUT [--dev-access] [--rescue]'
+usage='usage: image/init-boot OUTPUT [--ramdisk] [--dev-access] [--rescue]'
 out=${1:?$usage}
 shift
-dev_access= rescue=
+ramdisk= dev_access= rescue=
 for arg; do
   case $arg in
+    --ramdisk) ramdisk=1 ;;
     --dev-access) dev_access=1 ;;
     --rescue) rescue=1 ;;
     *) echo "$usage" >&2; exit 2 ;;
   esac
 done
 vault=${PHONEWAVE_VAULT:-/mnt/development/denial-os/device-vault}
-font=/mnt/development/denial-os/linux-perpetua/lib/fonts/font_ter16x32.c
+font=${LINUX_PERPETUA:-/mnt/development/denial-os/linux-perpetua}/lib/fonts/font_ter16x32.c
 partition_size=$((8 << 20))
 
 umask 022
@@ -62,11 +63,15 @@ aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -Werror \
 (cd "$root" && find . | LC_ALL=C sort | cpio -o -H newc -R 0:0 --reproducible --quiet) > "$work/ramdisk.cpio"
 lz4 -q -l -12 --favor-decSpeed "$work/ramdisk.cpio" "$work/ramdisk.cpio.lz4"
 
-mkbootimg --header_version 4 --ramdisk "$work/ramdisk.cpio.lz4" --output "$work/init_boot.img"
-avbtool add_hash_footer --image "$work/init_boot.img" --partition_size $partition_size \
-  --partition_name init_boot --hash_algorithm sha256 --algorithm NONE
-unpack_bootimg --boot_img "$work/init_boot.img" --out "$work/unpacked" > /dev/null
-cmp -s "$work/unpacked/ramdisk" "$work/ramdisk.cpio.lz4" || { echo "the packed ramdisk differs" >&2; exit 1; }
 mkdir -p "$(dirname "$out")"
-mv "$work/init_boot.img" "$out"
+if [ -n "$ramdisk" ]; then
+  mv "$work/ramdisk.cpio.lz4" "$out"
+else
+  mkbootimg --header_version 4 --ramdisk "$work/ramdisk.cpio.lz4" --output "$work/init_boot.img"
+  avbtool add_hash_footer --image "$work/init_boot.img" --partition_size $partition_size \
+    --partition_name init_boot --hash_algorithm sha256 --algorithm NONE
+  unpack_bootimg --boot_img "$work/init_boot.img" --out "$work/unpacked" > /dev/null
+  cmp -s "$work/unpacked/ramdisk" "$work/ramdisk.cpio.lz4" || { echo "the packed ramdisk differs" >&2; exit 1; }
+  mv "$work/init_boot.img" "$out"
+fi
 echo "built $out"

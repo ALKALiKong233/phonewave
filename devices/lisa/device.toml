@@ -1,0 +1,18 @@
+# Xiaomi 11 Lite 5G NE.
+codename = "lisa"
+model = "Xiaomi 11 Lite 5G NE"
+chassis = "handset"
+soc = "sm7325"
+dtb = "qcom/sm7325-xiaomi-lisa.dtb"
+
+[display]
+panel = "xiaomi,lisa-k9d-vtdr6130"
+resolution = [1080, 2400]
+refresh_hz = [60, 90]
+
+[touch]
+controller = "goodix,gt9897"
+
+[haptics]
+actuator = "Awinic AW8624 LRA"
+input_name = "aw8624-haptics"

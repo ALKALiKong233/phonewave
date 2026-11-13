@@ -90,6 +90,11 @@ rescue() {
 	echo 0xcd > $g/os_desc/b_vendor_code
 	echo MSFT100 > $g/os_desc/qw_sign
 	ln -s $g/configs/c.1 $g/os_desc/c.1
+	if [ ! -s /run/phonewave-slot ]; then
+		mkdir -p /tmp/m
+		if modules /tmp/m; then umount /tmp/m 2>/dev/null; fi
+		rmdir /tmp/m 2>/dev/null || true
+	fi
 	mount -t functionfs fastboot /dev/usb-ffs/fastboot &&
 		fastboot /dev/usb-ffs/fastboot "$product" "$(cat $g/strings/0x409/serialnumber)" "$*" ||
 		{ mark "rescue: no fastboot"; rm $g/configs/c.1/ffs.fastboot; }
@@ -141,19 +146,26 @@ key-held && rescue "Volume key held"
 [ -x /newroot/usr/lib/systemd/systemd ] || rescue "No systemd on ${root#/dev/}"
 
 # The boot partition with this kernel's modules: its filesystem starts at the
-# page after the kernel, whose size is in the header. Whichever slot holds
-# a folder named after the running kernel is the one that booted.
+# page after the kernel (and ramdisk on header v3), whose sizes are in the
+# header. Whichever slot holds a folder named after the running kernel is the
+# one that booted.
 modules() {
 	release=$(uname -r)
+	target=${1:-/newroot/usr/lib/modules}
 	for b in /sys/class/block/sd*; do
 		grep -qx 'PARTNAME=boot\(_[ab]\)\{0,1\}' $b/uevent 2>/dev/null || continue
 		boot=/dev/${b##*/}
 		size=$(dd if=$boot bs=4 skip=2 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')
-		[ -n "$size" ] || continue
-		mount -t erofs -o ro,fsoffset=$(( (size + 4095) / 4096 * 4096 + 4096 )) $boot /newroot/usr/lib/modules 2>/dev/null || continue
-		[ -d /newroot/usr/lib/modules/$release ] &&
-			slot=$(sed -n 's/^PARTNAME=boot//p' $b/uevent) && return 0
-		umount /newroot/usr/lib/modules
+		rsize=$(dd if=$boot bs=4 skip=3 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')
+		[ -n "$size" ] && [ -n "$rsize" ] || continue
+		offset=$(( 4096 + (size + 4095) / 4096 * 4096 + (rsize + 4095) / 4096 * 4096 ))
+		mount -t erofs -o ro,fsoffset=$offset $boot "$target" 2>/dev/null || continue
+		if [ -d "$target/$release" ]; then
+			slot=$(sed -n 's/^PARTNAME=boot//p' $b/uevent)
+			[ -z "$slot" ] || printf '%s' "$slot" > /run/phonewave-slot
+			return 0
+		fi
+		umount "$target"
 	done
 	return 1
 }

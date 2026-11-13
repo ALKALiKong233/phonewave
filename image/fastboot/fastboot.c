@@ -177,6 +177,11 @@ static void find_slot(void)
 	}
 	if (f)
 		fclose(f);
+	f = slot[0] ? NULL : fopen("/run/phonewave-slot", "r");
+	if (f && fgets(line, sizeof line, f))
+		sscanf(line, "%7[_a-z]", slot);
+	if (f)
+		fclose(f);
 	if (slot[0] != '_' || !slot[1] || slot[2])
 		slot[0] = 0;
 }

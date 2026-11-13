@@ -1,0 +1,3 @@
+# Sony IMX355 ultrawide rear camera.
+role = "ultrawide"
+zoom = 0.6

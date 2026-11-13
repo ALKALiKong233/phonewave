@@ -12,6 +12,7 @@ its own.
 | `kaanapali/Nubia-NX809J` | RedMagic 11 Pro |
 | `kaanapali/OnePlus-Pad4` | OnePlus Pad 4 |
 | `kaanapali/Xiaomi-17` | Xiaomi 17 |
+| `sm7325/Xiaomi-Lisa` | Xiaomi 11 Lite 5G NE |
 
 WirePlumber sets the phones' cards to software volume
 (`image/rootfs/usr/share/wireplumber/wireplumber.conf.d/51-phone-audio.conf`).

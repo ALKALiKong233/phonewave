@@ -40,6 +40,12 @@ def booted_slot():
         m = re.search(r'androidboot\.slot_suffix\s*=?\s*"?(_[ab])', text)
         if m:
             return m.group(1)
+    try:
+        slot = open("/run/phonewave-slot").read().strip()
+        if slot in ("_a", "_b"):
+            return slot
+    except OSError:
+        pass
     return ""
 
 
