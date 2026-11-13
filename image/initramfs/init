@@ -72,6 +72,30 @@ part() {
 	return 1
 }
 
+# The boot partition with this kernel's modules: its filesystem starts at the
+# page after the kernel (and ramdisk on header v3), whose sizes are in the
+# header. Whichever slot holds a folder named after the running kernel is the
+# one that booted.
+modules() {
+	release=$(uname -r)
+	target=${1:-/newroot/usr/lib/modules}
+	for b in /sys/class/block/sd*; do
+		grep -qx 'PARTNAME=boot\(_[ab]\)\{0,1\}' $b/uevent 2>/dev/null || continue
+		boot=/dev/${b##*/}
+		size=$(dd if=$boot bs=4 skip=2 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')
+		rsize=$(dd if=$boot bs=4 skip=3 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')
+		[ -n "$size" ] && [ -n "$rsize" ] || continue
+		offset=$(( 4096 + (size + 4095) / 4096 * 4096 + (rsize + 4095) / 4096 * 4096 ))
+		mount -t erofs -o ro,fsoffset=$offset $boot "$target" 2>/dev/null || continue
+		if [ -d "$target/$release" ]; then
+			slot=$(sed -n 's/^PARTNAME=boot//p' $b/uevent)
+			[ -z "$slot" ] || printf '%s' "$slot" > /run/phonewave-slot
+			return 0
+		fi
+		umount "$target"
+	done
+	return 1
+}
 # The reason goes on the screen too: a line of at most 36 characters.
 rescue() {
 	mark "rescue: $*"
@@ -145,30 +169,6 @@ fi
 key-held && rescue "Volume key held"
 [ -x /newroot/usr/lib/systemd/systemd ] || rescue "No systemd on ${root#/dev/}"
 
-# The boot partition with this kernel's modules: its filesystem starts at the
-# page after the kernel (and ramdisk on header v3), whose sizes are in the
-# header. Whichever slot holds a folder named after the running kernel is the
-# one that booted.
-modules() {
-	release=$(uname -r)
-	target=${1:-/newroot/usr/lib/modules}
-	for b in /sys/class/block/sd*; do
-		grep -qx 'PARTNAME=boot\(_[ab]\)\{0,1\}' $b/uevent 2>/dev/null || continue
-		boot=/dev/${b##*/}
-		size=$(dd if=$boot bs=4 skip=2 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')
-		rsize=$(dd if=$boot bs=4 skip=3 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')
-		[ -n "$size" ] && [ -n "$rsize" ] || continue
-		offset=$(( 4096 + (size + 4095) / 4096 * 4096 + (rsize + 4095) / 4096 * 4096 ))
-		mount -t erofs -o ro,fsoffset=$offset $boot "$target" 2>/dev/null || continue
-		if [ -d "$target/$release" ]; then
-			slot=$(sed -n 's/^PARTNAME=boot//p' $b/uevent)
-			[ -z "$slot" ] || printf '%s' "$slot" > /run/phonewave-slot
-			return 0
-		fi
-		umount "$target"
-	done
-	return 1
-}
 if modules; then
 	echo -n /usr/lib/modules/$release/firmware > /sys/module/firmware_class/parameters/path
 	units=/newroot/usr/lib/modules/$release/systemd/system
