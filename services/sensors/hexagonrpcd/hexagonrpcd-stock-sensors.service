@@ -2,7 +2,14 @@
 Description=Copy the ADSP's sensor configuration from the stock partitions
 # Phones whose fingerprint storage mounts persist read-write: read it there.
 After=run-goodix-persist.mount
+# Mainline exposes the platform identity required by the stock JSON selectors
+# through qcom_socinfo debugfs, rather than Android's sysfs attributes.
+Wants=sys-kernel-debug.mount
+After=sys-kernel-debug.mount
 
 [Service]
 Type=oneshot
+# Keep the copied registry across listener restarts, without remounting stock
+# partitions or discarding changes the running sensors PD made to its copy.
+RemainAfterExit=yes
 ExecStart=/usr/lib/hexagonrpcd/stock-sensors /run/hexagonrpcd

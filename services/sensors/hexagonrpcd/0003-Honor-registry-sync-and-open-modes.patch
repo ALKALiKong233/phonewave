@@ -1,0 +1,98 @@
+From: Phonewave contributors
+Subject: [PATCH] hexagonrpcd: sync real registry descriptors and honor r+ failures
+
+The imported write implementation acknowledges fsync without syncing, and
+silently substitutes a read-only descriptor for a failed r+ open. Do not
+claim either operation succeeded. This daemon serves a RAM copy of stock
+persist; errors still need to be returned faithfully to the DSP.
+
+--- a/hexagonrpcd/hexagonfs.h
++++ b/hexagonrpcd/hexagonfs.h
+@@ -44,1 +44,2 @@
+ 	int (*seek)(struct hexagonfs_fd *fd, off_t off, int whence);
++	int (*sync)(struct hexagonfs_fd *fd);
+@@ -88,1 +89,2 @@
+ ssize_t hexagonfs_write(struct hexagonfs_fd **fds, int fileno, size_t size, const void *ptr);
++int hexagonfs_fsync(struct hexagonfs_fd **fds, int fileno);
+--- a/hexagonrpcd/hexagonfs.c
++++ b/hexagonrpcd/hexagonfs.c
+@@ -384,1 +384,17 @@
++int hexagonfs_fsync(struct hexagonfs_fd **fds, int fileno)
++{
++	struct hexagonfs_fd *fd;
++
++	if (fileno < 0 || fileno >= HEXAGONFS_MAX_FD)
++		return -EBADF;
++
++	fd = fds[fileno];
++	if (fd == NULL)
++		return -EBADF;
++	if (fd->ops->sync == NULL)
++		return -ENOSYS;
++
++	return fd->ops->sync(fd);
++}
++
+ int hexagonfs_ftruncate(struct hexagonfs_fd **fds, int fileno, off_t len)
+--- a/hexagonrpcd/hexagonfs_mapped.c
++++ b/hexagonrpcd/hexagonfs_mapped.c
+@@ -219,1 +219,12 @@
++static int mapped_sync(struct hexagonfs_fd *fd)
++{
++	struct mapped_ctx *ctx = fd->data;
++
++	if (ctx == NULL)
++		return -ENOENT;
++	if (fsync(ctx->fd))
++		return -errno;
++	return 0;
++}
++
+ static int mapped_truncate(struct hexagonfs_fd *fd, off_t len)
+@@ -510,1 +521,2 @@
+ 	.write = mapped_write,
++	.sync = mapped_sync,
+@@ -530,1 +542,2 @@
+ 	.write = mapped_or_empty_write,
++	.sync = mapped_sync,
+--- a/hexagonrpcd/apps_std.c
++++ b/hexagonrpcd/apps_std.c
+@@ -165,3 +165,2 @@
+ 	int flags = 0;
+-	int ret;
+ 
+@@ -189,11 +188,1 @@
+-	ret = hexagonfs_create(ctx->fds, ctx->rootfd, dirfd, name, flags);
+-
+-	/*
+-	 * "r+" must not create the file, and on a read-only tree the DSP is
+-	 * normally only going to read it.
+-	 */
+-	if (ret < 0 && !(flags & O_CREAT)
+-	 && (ret == -EACCES || ret == -EROFS || ret == -ENOSYS))
+-		ret = hexagonfs_openat(ctx->fds, ctx->rootfd, dirfd, name);
+-
+-	return ret;
++	return hexagonfs_create(ctx->fds, ctx->rootfd, dirfd, name, flags);
+@@ -271,4 +258,1 @@
+-/*
+- * Writes are synchronous here and land in the page cache; nothing to wait
+- * for from the DSP's point of view.
+- */
++/* Complete the actual host sync before acknowledging it to the DSP. */
+@@ -279,7 +263,9 @@
+-#ifdef HEXAGONRPC_VERBOSE
++	struct apps_std_ctx *ctx = data;
+ 	const uint32_t *fd = inbufs[0].p;
+-
+-	printf("ignore fsync(%u)\n", *fd);
+-#endif
+-
+-	return 0;
++	int ret = hexagonfs_fsync(ctx->fds, *fd);
++
++	if (ret) {
++		fprintf(stderr, "Could not sync file: %s\n", strerror(-ret));
++		return AEE_EFAILED;
++	}
++	return 0;

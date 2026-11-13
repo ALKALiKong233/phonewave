@@ -10,10 +10,11 @@ copies what the ADSP's sensor drivers read into DIR:
 
     sensors/config        vendor's etc/sensors/config
     sensors/sns_reg.conf  vendor's etc/sensors/sns_reg_config
-    sensors/registry      persist's sensors/registry/registry
+    sensors/persist       persist's sensors/registry (including sns_reg_version)
     odm/sensors/config    odm's etc/sensors/config, where the phone has one
     odm/sensor/config     odm's etc/sensor/config, where the phone has one
     dsp                   empty
+    socinfo               Android-compatible names for the kernel's SoC identity
 
 A copy, not the partitions: the ADSP may write its registry, and those
 writes stay in DIR until the next start.
@@ -98,6 +99,60 @@ def mounted_at(device):
     return None
 
 
+def copy_socinfo(out):
+    """Serve real SoC identity using Android's names, including mainline SMEM.
+
+    Mainline puts platform fields in debugfs instead of Android's soc0 sysfs.
+    Names follow Xiaomi lisa-r-oss drivers/soc/qcom/socinfo.c, not the DT model.
+    Missing or unknown metadata is fatal: starting a registry with incomplete
+    selectors can crash the sensors PD and the ADSP.
+    """
+    sysfs = "/sys/devices/soc0"
+    debugfs = "/sys/kernel/debug/qcom_socinfo"
+    platforms = {
+        0: "Unknown", 1: "Surf", 2: "FFA", 3: "Fluid", 4: "SVLTE_FFA",
+        5: "SLVTE_SURF", 7: "MDM_MTP_NO_DISPLAY", 8: "MTP", 9: "Liquid",
+        10: "Dragon", 11: "QRD", 13: "HRD", 14: "DTV", 21: "RCM",
+        23: "STP", 24: "SBC", 25: "ADP", 31: "HDK", 33: "ATP", 34: "IDP",
+    }
+
+    def number(name):
+        with open(os.path.join(debugfs, name)) as f:
+            return int(f.read().strip(), 0)
+
+    dest = os.path.join(out, "socinfo")
+    os.mkdir(dest)
+    for name in ("hw_platform", "platform_subtype", "platform_subtype_id",
+                 "platform_version", "soc_id", "revision"):
+        try:
+            with open(os.path.join(sysfs, name)) as f:
+                value = f.read().strip()
+        except FileNotFoundError:
+            if name == "hw_platform":
+                value = platforms[number("hardware_platform")]
+            elif name == "platform_subtype":
+                platform = number("hardware_platform")
+                subtype = number("hardware_platform_subtype")
+                if platform == 11:
+                    value = {0: "QRD", 1: "SKUAA", 2: "SKUF",
+                             3: "SKUAB", 5: "SKUG"}[subtype]
+                elif platform == 25:
+                    value = "ADP"
+                else:
+                    value = {0: "Unknown", 1: "charm", 2: "strange",
+                             3: "strange_2a"}[subtype]
+            elif name == "platform_subtype_id":
+                value = str(number("hardware_platform_subtype"))
+            elif name == "platform_version":
+                value = str(number("platform_version"))
+            else:
+                raise
+        if not value:
+            raise ValueError(f"empty SoC identity field: {name}")
+        with open(os.path.join(dest, name), "w") as f:
+            f.write(value + "\n")
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit("usage: stock-sensors DIR")
@@ -137,8 +192,14 @@ def main():
             shutil.copytree(os.path.join(vendor, "etc/sensors/config"), os.path.join(sensors, "config"))
             shutil.copyfile(os.path.join(vendor, "etc/sensors/sns_reg_config"),
                             os.path.join(sensors, "sns_reg.conf"))
-            shutil.copytree(os.path.join(persist, "sensors/registry/registry"),
-                            os.path.join(sensors, "registry"))
+            shutil.copytree(os.path.join(persist, "sensors/registry"),
+                            os.path.join(sensors, "persist"))
+            # The DSP otherwise tries to create a new registry version before
+            # loading its drivers. Do not attach to an incompletely seeded tree.
+            with open(os.path.join(sensors, "persist", "sns_reg_version")) as f:
+                if not f.read():
+                    raise ValueError("empty stock sns_reg_version")
+            copy_socinfo(out)
             # Xiaomi's odm says sensors, OnePlus's sensor.
             for name in ("sensors", "sensor"):
                 odm = os.path.join(work, "odm/etc", name, "config")

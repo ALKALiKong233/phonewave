@@ -52,8 +52,15 @@ the GPU context and Denial aborts during GBM initialization.
   `dtbo_a` boots the installed rootfs. With `linux-firmware-qcom` installed,
   Denial's hardware GLES renderer and DSI-1 at 1080x2400/90 Hz were verified
   on-device, including a captured first-start setup screen (2026-11-13).
+- Audio: `MultiMedia1` (`PCM0`) playback and `MultiMedia2` (`PCM1`) capture
+  are verified with `services/audio/ucm/ucm2/Qualcomm/sm7325/Xiaomi-Lisa/HiFi.conf`
+  and `52-xiaomi-lisa.conf` (48 kHz S16_LE stereo into the TFA9873 protection
+  container). Add `VoiceCall.conf` under that UCM directory for modem call audio.
+- Sensors & rotation: ADSP uses non-secure FastRPC `/dev/fastrpc-adsp` via
+  `boot/tail/systemd/system/hexagonrpcd.service.d/lisa.conf`, with real
+  registry writes and mainline `qcom_socinfo` metadata in `hexagonrpcd`.
+  `steinerd` defaults (`+y` top edge) match the panel frame and Denial rotates
+  `DSI-1` across all four orientations.
 - Modem (`dmail`): add `boot/tail/dmail/device.toml` and enable
   `dmail.service` once SM7325 IPA embedded endpoint IDs are verified on-device.
-- Audio: add `VoiceCall.conf` under
-  `services/audio/ucm/ucm2/Qualcomm/sm7325/Xiaomi-Lisa/` for modem call audio.
 - Fingerprint: side-mounted power-button sensor is not yet wired.

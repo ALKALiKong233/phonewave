@@ -16,13 +16,14 @@ sensor core and nothing more.
   start, over FastRPC. `hexagonrpcd -s` serves it to the sensors PD from the
   phone's stock files: `sensors/config` and `sensors/sns_reg.conf` from the
   vendor partition (`/vendor/etc/sensors/config`, `sns_reg_config`), and
-  `sensors/registry` from persist (`sensors/registry/registry`). Xiaomi's
+  `sensors/persist` from persist (the whole `sensors/registry` directory,
+  including its version and calibration). Xiaomi's
   phones also read `odm/sensors/config` from odm (`/odm/etc/sensors/config`),
   which takes Phonewave's build, [`../hexagonrpcd`](../hexagonrpcd).
-  hexagonrpcd has to run from boot: drivers that found no configuration
-  when the ADSP came up stay missing until the ADSP restarts. The device's
-  `rootfs/` carries the unit; the files are the phone's own and are not in
-  this repository.
+  The daemon must serve complete SoC identity and a writable RAM registry
+  before attaching; the old read-only setup can crash the ADSP. See the
+  linked hexagonrpcd safety notes. The device's boot tail selects its
+  endpoint; the files are the phone's own and are not in this repository.
 - Where the sensor core's y axis is not the screen's top edge, the boot
   image's tail names the axis that is, in `steinerd/top`: `+x`, `-y` or
   `-x` (`+y` without the file). steinerd turns acceleration, rotation rate,

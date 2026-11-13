@@ -6,20 +6,35 @@ _commit=da7a3742ab8d5273a281b70ee11f16fb2cb6a690
 _src=$startdir/../../../services/sensors/hexagonrpcd
 # The upstream version, then the number of Phonewave commits under _src.
 pkgver=0.5.0.r$(git -C "$_src" rev-list --count HEAD -- .)
-pkgrel=1
+pkgrel=2
 arch=(aarch64)
 url="https://github.com/linux-msm/hexagonrpc"
 license=(GPL-3.0-or-later)
 options=(!strip !debug !lto)
 depends=(glibc python device-mapper util-linux)
+_patches=(
+  0000-Support-real-registry-writes.patch
+  0001-rpcd-Serve-the-sensor-configuration-from-odm-too.patch
+  0002-rpcd-Serve-odm-etc-sensor-config-too.patch
+  0003-Honor-registry-sync-and-open-modes.patch
+)
 source=("hexagonrpc-$_commit.tar.gz::https://github.com/linux-msm/hexagonrpc/archive/$_commit.tar.gz")
-sha256sums=('651ab53dcf92a2766ba6ec42cac2ccdbd67382da5211b14c5fa33b618153c435')
+sha256sums=(651ab53dcf92a2766ba6ec42cac2ccdbd67382da5211b14c5fa33b618153c435)
+_patch_sha256s=(
+  6c1838103b55f81b04e92b8b170fda51ae7b1ee34b151a79e259fe10efe93d12
+  b5c722869b35b3a5b43fe953bcbf6023b463e58704031494043605d4b53f79e8
+  db10765edb3899b8d8e043b1fbe0cbfd543d9510ba5f39513ff79158ee1a7dcb
+  6f08e3397f5ee19bd3e9251f826a79354ed2264485d606cf88f9fb030e8b81b4
+)
 . "$startdir/../../cross.sh"
 
 prepare() {
-  local p
-  for p in "$_src"/*.patch; do
-    patch -d hexagonrpc-$_commit -Np1 -s < "$p"
+  local p i
+  for i in "${!_patches[@]}"; do
+    printf '%s  %s\n' "${_patch_sha256s[$i]}" "$_src/${_patches[$i]}"
+  done | sha256sum -c - || return
+  for p in "${_patches[@]}"; do
+    patch -d hexagonrpc-$_commit -Np1 -s < "$_src/$p"
   done
   cat > cross.ini <<EOT
 [binaries]

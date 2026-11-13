@@ -22,8 +22,7 @@ index d374958..a384b43 100644
  #define SENSORS_CONFIG		"/sensors/config/"
  #define SENSORS_REGISTRY	"/sensors/registry/"
  #define SNS_REG_CONFIG		"/sensors/sns_reg.conf"
-@@ -111,13 +112,14 @@ static struct hexagonfs_dirent *hfs_map_or_empty(const char *name, const char *p
-  */
+@@ -112,12 +113,13 @@
  struct hexagonfs_dirent *construct_root_dir(const char *prefix, const char *dsp)
  {
 -	char *acdbdata, *dsp_libs, *sns_cfg, *sns_reg, *sns_reg_config, *socinfo;
